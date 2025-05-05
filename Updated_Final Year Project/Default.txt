@@ -1,0 +1,206 @@
+#include "GUI.h"
+#include <wx/wx.h> 
+#include <wx/splitter.h>
+#include <wx/dir.h>
+#include <wx/stattext.h>
+#include <wx/menu.h>
+#include <wx/treectrl.h>
+#include <wx/wfstream.h>
+#include <wx/imaglist.h>
+#include <wx/artprov.h>
+#include <wx/filename.h> // Include wxFileName
+
+
+enum IDs {
+	FileExplorer_ID = 1,
+	ID_MENU_OPEN_FOLDER,
+	ID_MENU_OPEN_FILE,
+	ID_MENU_SAVE,
+	ID_MENU_RENAME,
+	ID_MENU_EXIT,
+	ID_MENU_CONVERT,
+	ID_MENU_GENERATE_REPORT,
+	ID_MENU_ABOUT
+};
+
+GUI::GUI(const wxString& title) : wxFrame(nullptr, wxID_ANY, title) {
+
+	// Create Menu Bar
+	wxMenuBar* menuBar = new wxMenuBar;
+
+	// Create File Menu
+	wxMenu* fileMenu = new wxMenu;
+	fileMenu->Append(ID_MENU_OPEN_FOLDER, "&Open Folder...\tCtrl-O", "Open a folder");
+	fileMenu->Append(ID_MENU_OPEN_FILE, "&Open File...\tCtrl-O", "Open a file");
+	fileMenu->Append(ID_MENU_SAVE, "&Save...\tCtrl-S", "Save a file");
+	fileMenu->Append(ID_MENU_RENAME, "&Rename...\tCtrl-R", "Rename a file");
+	fileMenu->AppendSeparator();
+	fileMenu->Append(ID_MENU_EXIT, "E&xit\tAlt-X", "Quit this program");
+
+	// Create Run Menu
+	wxMenu* runMenu = new wxMenu;
+	runMenu->Append(ID_MENU_CONVERT, "&Convert IR...\tCtrl-R", "Run the program");
+	runMenu->Append(ID_MENU_GENERATE_REPORT, "&Generate Report...\tCtrl-G", "Generate Report");	
+
+
+	// Create Help Menu
+	wxMenu* helpMenu = new wxMenu;
+	helpMenu->Append(ID_MENU_ABOUT, "&About...\tF1", "Show about dialog");
+
+	// Add Menus to Menu Bar
+	menuBar->Append(fileMenu, "&File");
+	menuBar->Append(runMenu, "&Run");
+	menuBar->Append(helpMenu, "&Help");
+
+	// Attach Menu Bar to the Frame
+	SetMenuBar(menuBar);
+
+	// Bind Events
+	Bind(wxEVT_MENU, &GUI::OnOpenFolder, this, ID_MENU_OPEN_FOLDER);
+	Bind(wxEVT_MENU, &GUI::OnOpenFile, this, ID_MENU_OPEN_FILE);
+	Bind(wxEVT_MENU, &GUI::OnSave, this, ID_MENU_SAVE);
+	Bind(wxEVT_MENU, &GUI::OnRename, this, ID_MENU_RENAME);
+	Bind(wxEVT_MENU, &GUI::OnExit, this, ID_MENU_EXIT);
+	Bind(wxEVT_MENU, &GUI::OnAbout, this, ID_MENU_ABOUT);
+
+	// Window Splitting
+	wxSplitterWindow* splitter = new wxSplitterWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBORDER | wxSP_LIVE_UPDATE);
+	wxSplitterWindow* rightSplitter = new wxSplitterWindow(splitter, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBORDER | wxSP_LIVE_UPDATE);
+	wxSplitterWindow* MiddleSplitter = new wxSplitterWindow(rightSplitter, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBORDER | wxSP_LIVE_UPDATE);
+
+	wxPanel* leftPanel = new wxPanel(splitter, wxID_ANY, wxDefaultPosition, wxDefaultSize);
+	wxPanel* upperRightPanel = new wxPanel(MiddleSplitter, wxID_ANY, wxDefaultPosition, wxDefaultSize);
+	wxPanel* bottomPanel = new wxPanel(rightSplitter, wxID_ANY, wxDefaultPosition, wxDefaultSize);
+	wxPanel* middlePanel = new wxPanel(MiddleSplitter, wxID_ANY, wxDefaultPosition, wxDefaultSize);
+
+	// Create the file explorer tree control
+	fileExplorer = new wxTreeCtrl(leftPanel, wxID_ANY, wxDefaultPosition, wxSize(250, 200), wxTR_HAS_BUTTONS | wxTR_FULL_ROW_HIGHLIGHT | wxTR_LINES_AT_ROOT | wxTR_MULTIPLE);
+
+	// Set up ImageList
+	wxImageList* imageList = new wxImageList(16, 16, true);
+	folderIcon = imageList->Add(wxArtProvider::GetBitmap(wxART_FOLDER, wxART_OTHER, wxSize(16, 16)));
+	fileIcon = imageList->Add(wxArtProvider::GetBitmap(wxART_NORMAL_FILE, wxART_OTHER, wxSize(16, 16)));
+	fileExplorer->AssignImageList(imageList);
+
+
+	//Panel Colours
+	upperRightPanel->SetBackgroundColour(wxColor(200, 100, 100)); // Use this instead of rightPanel
+	middlePanel->SetBackgroundColour(wxColor(100, 100, 200));
+	bottomPanel->SetBackgroundColour(wxColor(200, 200, 100));
+
+
+	//Pane Sizes
+    rightSplitter->SetMinimumPaneSize(150);
+	splitter->SetMinimumPaneSize(150);
+	MiddleSplitter->SetMinimumPaneSize(150);
+
+	// Split the window
+	rightSplitter->SplitHorizontally(MiddleSplitter, bottomPanel); // MiddleSplitter replaces rightPanel
+	MiddleSplitter->SplitVertically(upperRightPanel, middlePanel); // Uses upperRightPanel
+    splitter->SplitVertically(leftPanel, rightSplitter);
+
+	//Sizers
+	wxBoxSizer* leftSizer = new wxBoxSizer(wxVERTICAL);
+	leftSizer->Add(fileExplorer, 1, wxEXPAND | wxALL, 5);
+	leftPanel->SetSizer(leftSizer);
+
+	//Panel Labeling
+	new wxStaticText(upperRightPanel, wxID_ANY, "Upper Right Panel", wxPoint(10, 10));
+	new wxStaticText(middlePanel, wxID_ANY, "Middle Panel", wxPoint(10, 10));
+	new wxStaticText(bottomPanel, wxID_ANY, "Bottom Panel", wxPoint(10, 10));
+
+	
+
+
+
+
+
+	CreateStatusBar();
+}
+
+// Event Handler for File Selection
+void GUI::OnFileSelected(wxTreeEvent& event) {
+	wxTreeItemId itemId = event.GetItem();
+	wxString selectedPath = fileExplorer->GetItemText(itemId);
+	SetStatusText("Selected: " + selectedPath);
+}
+
+// Method to populate the tree
+void GUI::PopulateTree(const wxString& path, wxTreeItemId parentId) {
+	wxDir dir(path);
+	if (!dir.IsOpened()) {
+		wxLogError("Cannot open directory '%s'.", path);
+		return;
+	}
+
+	wxString filename;
+	bool cont = dir.GetFirst(&filename);
+	while (cont) {
+		wxString fullPath = path + "/" + filename;
+		wxTreeItemId newItemId = fileExplorer->AppendItem(parentId, filename, wxDirExists(fullPath) ? folderIcon : fileIcon);
+		if (wxDirExists(fullPath)) {
+			PopulateTree(fullPath, newItemId);
+		}
+		cont = dir.GetNext(&filename);
+	}
+}
+
+void GUI::OnOpenFolder(wxCommandEvent& event) {
+	wxDirDialog openFolderDialog(this, _("Open folder"), "", wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
+	if (openFolderDialog.ShowModal() == wxID_CANCEL)
+		return; // the user changed idea...
+
+	wxString folderPath = openFolderDialog.GetPath();
+	wxFileName folderName(folderPath);
+	fileExplorer->DeleteAllItems();
+	wxTreeItemId rootId = fileExplorer->AddRoot(folderName.GetFullName(), folderIcon);
+	PopulateTree(folderPath, rootId);
+	fileExplorer->Expand(rootId);
+}
+
+void GUI::OnOpenFile(wxCommandEvent& event) {
+	wxFileDialog openFileDialog(this, _("Open file"), "", "",
+		"All files (*.*)|*.*", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+	if (openFileDialog.ShowModal() == wxID_CANCEL)
+		return; // the user changed idea...
+
+	// Proceed with opening the file chosen by the user
+	wxFileInputStream input_stream(openFileDialog.GetPath().ToStdString());
+	if (!input_stream.IsOk()) {
+		wxLogError("Cannot open file '%s'.", openFileDialog.GetPath());
+		return;
+	}
+}
+
+void GUI::OnSave(wxCommandEvent& event) {
+	wxFileDialog saveFileDialog(this, _("Save file"), "", "",
+		"All files (*.*)|*.*", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+	if (saveFileDialog.ShowModal() == wxID_CANCEL)
+		return; // the user changed idea...
+
+	// proceed saving the file chosen by the user;
+	// this can be done with e.g. wxWidgets output streams:
+	wxFileOutputStream output_stream(saveFileDialog.GetPath());
+	if (!output_stream.IsOk()) {
+		wxLogError("Cannot save file '%s'.", saveFileDialog.GetPath());
+		return;
+	}
+}
+
+void GUI::OnRename(wxCommandEvent& event) {
+	wxTextEntryDialog renameDialog(this, _("Rename file"), _("Enter new name:"));
+	if (renameDialog.ShowModal() == wxID_CANCEL)
+		return; // the user changed idea...
+
+	wxString newName = renameDialog.GetValue();
+	// Implement renaming logic here
+}
+
+void GUI::OnExit(wxCommandEvent& event) {
+	Close(true);
+}
+
+void GUI::OnAbout(wxCommandEvent& event) {
+	wxMessageBox("For support contact the developers of this application: BCE0000625 and BCE0000825",
+		"Help", wxOK | wxICON_INFORMATION);
+}
